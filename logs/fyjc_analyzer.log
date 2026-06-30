@@ -18,3 +18,11 @@
 [2026-06-30 12:35:34] INFO     fyjc.database: DuckDB initialized with 10,000 rows as table 'fyjc'
 [2026-06-30 12:36:54] INFO     fyjc.filter_engine: Filter returned 10,000 rows
 [2026-06-30 12:36:54] INFO     fyjc.analyzer: Analysis complete | Total: 2979 | Safe: 2479 | Moderate: 280 | Dream: 220
+[2026-06-30 13:10:23] INFO     fyjc.loader: Loading from Parquet cache: C:\Users\arpit\Downloads\fyjc_cutoff_analyzer\fyjc_analyzer\data\processed\fyjc_cutoff_cache.parquet
+[2026-06-30 13:10:24] INFO     fyjc.loader: Parquet cache loaded: 10,000 rows
+[2026-06-30 13:10:24] INFO     fyjc.loader: DataFrame ready | Rows: 10,000 | Cols: 23 | Memory: 1.4 MB
+[2026-06-30 13:10:24] INFO     fyjc.preprocessor: Starting preprocessing pipeline...
+[2026-06-30 13:10:24] INFO     fyjc.preprocessor: Preprocessing complete | Original: 10,000 | Final: 10,000 | Dropped: 0
+[2026-06-30 13:10:24] INFO     fyjc.database: DuckDB initialized with 10,000 rows as table 'fyjc'
+[2026-06-30 13:12:59] INFO     fyjc.filter_engine: Filter returned 10,000 rows
+[2026-06-30 13:12:59] INFO     fyjc.analyzer: Analysis complete | Total: 2979 | Safe: 1220 | Moderate: 822 | Dream: 937

@@ -53,31 +53,33 @@ class FilterEngine:
 
     def filter(
         self,
-        streams:       Optional[List[str]] = None,
-        districts:     Optional[List[str]] = None,
-        regions:       Optional[List[str]] = None,
-        mediums:       Optional[List[str]] = None,
-        round_ids:     Optional[List[int]] = None,
-        category:      str = "General",
-        areas:         Optional[List[str]] = None,
-        college_name:  Optional[str] = None,
-        min_cutoff:    Optional[float] = None,
-        max_cutoff:    Optional[float] = None,
+        streams:             Optional[List[str]] = None,
+        districts:           Optional[List[str]] = None,
+        regions:             Optional[List[str]] = None,
+        mediums:             Optional[List[str]] = None,
+        round_ids:           Optional[List[int]] = None,
+        category:            str = "General",
+        areas:               Optional[List[str]] = None,
+        college_name:        Optional[str] = None,
+        min_cutoff:          Optional[float] = None,
+        max_cutoff:          Optional[float] = None,
+        reservation_details: Optional[List[str]] = None,
     ) -> pd.DataFrame:
         """
         Apply filters and return matching rows.
 
         Args:
-            streams:      List of stream names (e.g., ['Science'])
-            districts:    List of district IDs/names
-            regions:      List of region IDs
-            mediums:      List of instruction mediums
-            round_ids:    Admission round numbers
-            category:     Reservation category column (e.g., 'General', 'OBC')
-            areas:        Area/locality names — fuzzy matched against college names
-            college_name: Partial college name search
-            min_cutoff:   Minimum cutoff % filter
-            max_cutoff:   Maximum cutoff % filter
+            streams:             List of stream names (e.g., ['Science'])
+            districts:           List of district IDs/names
+            regions:             List of region IDs
+            mediums:             List of instruction mediums
+            round_ids:           Admission round numbers
+            category:            Reservation category column (e.g., 'General', 'OBC')
+            areas:               Area/locality names — fuzzy matched against college names
+            college_name:        Partial college name search
+            min_cutoff:          Minimum cutoff % filter
+            max_cutoff:          Maximum cutoff % filter
+            reservation_details: List of reservation details types (e.g. 'Women (30%)')
 
         Returns:
             Filtered DataFrame
@@ -85,12 +87,12 @@ class FilterEngine:
         if self._use_duckdb:
             result = self._filter_duckdb(
                 streams, districts, mediums, round_ids,
-                college_name, category, min_cutoff, max_cutoff
+                college_name, category, min_cutoff, max_cutoff, reservation_details
             )
         else:
             result = self._filter_pandas(
                 streams, districts, regions, mediums,
-                round_ids, category, college_name, min_cutoff, max_cutoff
+                round_ids, category, college_name, min_cutoff, max_cutoff, reservation_details
             )
 
         # Area filter is always done in pandas (requires fuzzy/substring match)
@@ -104,7 +106,7 @@ class FilterEngine:
 
     def _filter_duckdb(
         self, streams, districts, mediums, round_ids,
-        college_name, category, min_cutoff, max_cutoff
+        college_name, category, min_cutoff, max_cutoff, reservation_details
     ) -> pd.DataFrame:
         """Use SQL for filtering — fastest for 1M+ rows."""
         sql = self.db.build_filter_query(
@@ -116,6 +118,7 @@ class FilterEngine:
             category_col=category,
             min_cutoff=min_cutoff,
             max_cutoff=max_cutoff,
+            reservation_details=reservation_details,
         )
         return self.db.query(sql)
 
@@ -123,7 +126,7 @@ class FilterEngine:
 
     def _filter_pandas(
         self, streams, districts, regions, mediums,
-        round_ids, category, college_name, min_cutoff, max_cutoff
+        round_ids, category, college_name, min_cutoff, max_cutoff, reservation_details
     ) -> pd.DataFrame:
         """Pure pandas filtering — fallback when DuckDB unavailable."""
         df = self.df.copy()
@@ -142,6 +145,9 @@ class FilterEngine:
 
         if round_ids:
             df = df[df["round_id"].isin(round_ids)]
+
+        if reservation_details:
+            df = df[df["ReservationDetails"].isin(reservation_details)]
 
         if college_name:
             mask = df["collegename"].str.contains(

@@ -121,10 +121,24 @@ class FYJCPreprocessor:
                     .replace("None", pd.NA)
                 )
 
-        # District and region IDs — just strip
+        # District and region IDs — clean, map to name, and normalize text
+        from src.utils.constants import DISTRICT_MAP
         for col in ["districtid", "regionid"]:
             if col in self.df.columns:
                 self.df[col] = self.df[col].astype(str).str.strip()
+
+        if "districtid" in self.df.columns:
+            def clean_and_map_district(val):
+                if pd.isna(val):
+                    return val
+                s = str(val).strip()
+                if s.endswith(".0"):
+                    s = s[:-2]
+                if s.lower() in ("nan", "none", ""):
+                    return pd.NA
+                return DISTRICT_MAP.get(s, s)
+
+            self.df["districtid"] = self.df["districtid"].apply(clean_and_map_district)
 
         logger.debug("Text columns normalized")
 
@@ -133,16 +147,27 @@ class FYJCPreprocessor:
     def _clamp_cutoff_values(self):
         """
         Ensure all cutoff percentages are in [0, 100].
-        Values outside this range are set to NaN (data errors).
+        If value > 100 and <= 500, it is likely raw marks out of 500, so we convert it to percentage (value / 5).
+        Values outside [0, 500] or negative are set to NaN.
         """
         cutoff_cols = [c for c in self.CUTOFF_COLUMNS if c in self.df.columns]
         invalid_count = 0
+        converted_count = 0
 
         for col in cutoff_cols:
-            mask = (self.df[col] < 0) | (self.df[col] > 100)
-            invalid_count += mask.sum()
-            self.df.loc[mask, col] = np.nan
+            # Convert values > 100 (raw marks out of 500) to percentage
+            marks_mask = (self.df[col] > 100) & (self.df[col] <= 500)
+            if marks_mask.any():
+                self.df.loc[marks_mask, col] = (self.df.loc[marks_mask, col] / 5.0).round(2)
+                converted_count += marks_mask.sum()
 
+            # Now clamp anything still outside [0, 100] to NaN
+            clamp_mask = (self.df[col] < 0) | (self.df[col] > 100)
+            invalid_count += clamp_mask.sum()
+            self.df.loc[clamp_mask, col] = np.nan
+
+        if converted_count > 0:
+            logger.info(f"Converted {converted_count} raw mark cutoffs (>100) to percentages (divided by 5.0)")
         if invalid_count > 0:
             logger.warning(
                 f"Clamped {invalid_count} out-of-range cutoff values to NaN"

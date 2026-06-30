@@ -64,7 +64,7 @@ st.markdown("""
 # ─── Data Loading (Cached) ────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner="Loading FYJC data...")
-def load_data(csv_path: str) -> pd.DataFrame:
+def load_data_v2(csv_path: str) -> pd.DataFrame:
     """Load and preprocess data (cached across Streamlit reruns)."""
     from src.core.loader import FYJCDataLoader
     from src.core.preprocessor import FYJCPreprocessor
@@ -84,17 +84,19 @@ def main():
 
     # ── CSV Path ──────────────────────────────────────────────────────────────
     csv_path = str(DEFAULT_CSV_PATH)
-    if not Path(csv_path).exists():
+    default_exists = Path(csv_path).exists()
+    round_files = list(Path(csv_path).parent.glob("[Rr]ound_*.csv"))
+    if not default_exists and not round_files:
         st.error(
             f"⚠️ CSV file not found: `{csv_path}`\n\n"
-            "Place your FYJC cutoff CSV at `data/raw/fyjc_cutoff.csv` "
-            "or run `python main.py --demo` to generate demo data."
+            "Place your consolidated CSV at `data/raw/fyjc_cutoff.csv` "
+            "or place round-specific CSV files like `Round_1_cutoff_2026-27.csv` in `data/raw/`."
         )
         st.stop()
 
     # ── Load Data ─────────────────────────────────────────────────────────────
     with st.spinner("Loading dataset..."):
-        df = load_data(csv_path)
+        df = load_data_v2(csv_path)
 
     st.success(f"✅ Dataset loaded: **{len(df):,} records**")
 
@@ -134,7 +136,22 @@ def main():
             format_func=lambda r: f"Round {r}"
         )
 
+        res_details_avail = sorted([str(x) for x in df["ReservationDetails"].dropna().unique().tolist()])
+        selected_res_details = st.multiselect(
+            "Reservation Details", options=res_details_avail
+        )
+
         area_search = st.text_input("🔎 Area / Locality (type to search)")
+        college_name_search = st.text_input("🏫 College Name (type to search)")
+
+        st.subheader("📈 Projection Simulator")
+        projected_change = st.slider(
+            "Projected Cutoff Inflation/Change",
+            min_value=-10.0, max_value=10.0,
+            value=0.0, step=0.1,
+            format="%+.1f%%",
+            help="Simulate an increase/decrease in cutoffs (inflation/deflation) for future rounds."
+        )
 
         st.divider()
         st.caption(f"v1.0.0 | mahafyjc.org.in data")
@@ -145,12 +162,14 @@ def main():
 
     engine = FilterEngine(df)
     filtered = engine.filter(
-        streams    = selected_streams or None,
-        districts  = selected_districts or None,
-        mediums    = selected_mediums or None,
-        round_ids  = selected_rounds or None,
-        areas      = [area_search] if area_search else None,
-        category   = category,
+        streams             = selected_streams or None,
+        districts           = selected_districts or None,
+        mediums             = selected_mediums or None,
+        round_ids           = selected_rounds or None,
+        areas               = [area_search] if area_search else None,
+        college_name        = college_name_search or None,
+        category            = category,
+        reservation_details = selected_res_details or None,
     )
 
     if filtered.empty:
@@ -159,7 +178,7 @@ def main():
 
     # ── Analyze ───────────────────────────────────────────────────────────────
     user    = UserProfile(marks=user_marks, category=category,
-                          streams=selected_streams)
+                          streams=selected_streams, projected_change=projected_change)
     analyzer = CutoffAnalyzer(user)
     results  = analyzer.analyze(filtered, deduplicate=True)
 
@@ -225,13 +244,14 @@ def _render_college_table(results: pd.DataFrame, user_marks: float, category: st
         return colors.get(str(val).lower(), "")
 
     show_cols = ["collegename", "stream", "medium", "districtid",
-                 "cutoff", "difference", "classification", "chance_pct", "round_id"]
+                 "cutoff", "projected_cutoff", "difference", "classification", "chance_pct", "round_id"]
     show_cols = [c for c in show_cols if c in display.columns]
 
-    styled = display[show_cols].style.applymap(
+    styled = display[show_cols].style.map(
         color_row, subset=["classification"]
     ).format({
         "cutoff": "{:.2f}%",
+        "projected_cutoff": "{:.2f}%",
         "difference": "{:+.2f}",
         "chance_pct": "{:.0f}%",
     })
@@ -265,13 +285,14 @@ def _render_charts(results: pd.DataFrame, user_marks: float):
         return
 
     col1, col2 = st.columns(2)
+    x_col = "projected_cutoff" if "projected_cutoff" in results.columns else "cutoff"
 
     with col1:
         # Histogram of cutoffs
         fig = px.histogram(
-            results, x="cutoff", nbins=30,
-            title="Cutoff Distribution",
-            labels={"cutoff": "Cutoff %", "count": "Colleges"},
+            results, x=x_col, nbins=30,
+            title="Projected Cutoff Distribution" if x_col == "projected_cutoff" else "Cutoff Distribution",
+            labels={x_col: "Cutoff %", "count": "Colleges"},
             color_discrete_sequence=["#2E75B6"]
         )
         fig.add_vline(x=user_marks, line_dash="dash", line_color="red",
@@ -297,8 +318,8 @@ def _render_charts(results: pd.DataFrame, user_marks: float):
     # Box plot by stream
     if "stream" in results.columns and results["stream"].nunique() > 1:
         fig3 = px.box(
-            results, x="stream", y="cutoff",
-            title="Cutoff Range by Stream",
+            results, x="stream", y=x_col,
+            title="Projected Cutoff Range by Stream" if x_col == "projected_cutoff" else "Cutoff Range by Stream",
             color="stream",
         )
         fig3.add_hline(y=user_marks, line_dash="dash", line_color="red")

@@ -84,6 +84,28 @@ class FYJCDataLoader:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def _get_source_files(self) -> List[Path]:
+        """
+        Determine the list of CSV files to load.
+        If using the default CSV path, scan for any 'Round_*.csv' files
+        in the same directory. If found, load all of them.
+        Otherwise, fall back to self.csv_path.
+        """
+        from config.settings import DEFAULT_CSV_PATH
+        try:
+            is_default = self.csv_path.resolve() == DEFAULT_CSV_PATH.resolve()
+        except Exception:
+            is_default = False
+
+        if is_default:
+            round_files = sorted(list(self.csv_path.parent.glob("[Rr]ound_*.csv")))
+            if round_files:
+                return round_files
+
+        return [self.csv_path]
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
     def load(self, force_reload: bool = False) -> pd.DataFrame:
         """
         Main entry point. Returns a fully loaded, optimized DataFrame.
@@ -91,7 +113,7 @@ class FYJCDataLoader:
         Load order:
           1. In-memory cache (if already loaded this session)
           2. Parquet cache on disk (fast, ~10x vs CSV)
-          3. Raw CSV file (slow first-time load, then saves Parquet)
+          3. Raw CSV file(s) (slow first-time load, then saves Parquet)
 
         Args:
             force_reload: If True, ignore all caches and re-read CSV
@@ -100,25 +122,43 @@ class FYJCDataLoader:
             Optimized pandas DataFrame
 
         Raises:
-            FileNotFoundError: If CSV file is not found
+            FileNotFoundError: If no CSV files are found
         """
         if self._df is not None and not force_reload:
             logger.debug("Returning in-memory cached DataFrame")
             return self._df
 
+        source_files = self._get_source_files()
+
+        # Check if Parquet cache is valid
+        cache_valid = False
         if self.use_cache and self.parquet_path.exists() and not force_reload:
+            try:
+                cache_mtime = self.parquet_path.stat().st_mtime
+                if all(cache_mtime > f.stat().st_mtime for f in source_files):
+                    cache_valid = True
+            except Exception:
+                cache_valid = False
+
+        if cache_valid:
             logger.info(f"Loading from Parquet cache: {self.parquet_path}")
             self._df = self._load_parquet()
         else:
-            if not self.csv_path.exists():
+            if not any(f.exists() for f in source_files):
                 raise FileNotFoundError(
-                    f"CSV file not found: {self.csv_path}\n"
-                    f"Please place your FYJC cutoff CSV in: {self.csv_path.parent}"
+                    f"No CSV files found. Checked: {[str(f) for f in source_files]}"
                 )
-            logger.info(f"Loading from CSV: {self.csv_path}")
-            self._df = self._load_csv_chunked()
+            logger.info(f"Loading from CSV files: {[f.name for f in source_files]}")
+            self._df = self._load_csv_chunked(source_files)
 
-            if self.use_cache:
+            from config.settings import DEFAULT_CSV_PATH
+            is_default = False
+            try:
+                is_default = self.csv_path.resolve() == DEFAULT_CSV_PATH.resolve()
+            except Exception:
+                pass
+
+            if self.use_cache and is_default:
                 self._save_parquet(self._df)
 
         self._log_stats(self._df)
@@ -147,15 +187,18 @@ class FYJCDataLoader:
 
     # ── Private Methods ───────────────────────────────────────────────────────
 
-    def _load_csv_chunked(self) -> pd.DataFrame:
+    def _load_csv_chunked(self, source_files: List[Path]) -> pd.DataFrame:
         """
-        Read CSV in chunks to handle files larger than available RAM.
+        Read CSV(s) in chunks to handle files larger than available RAM.
         Applies dtype optimizations per chunk, then concatenates.
+
+        Args:
+            source_files: List of Path objects for CSV files to load
 
         Returns:
             Concatenated, optimized DataFrame
         """
-        logger.info(f"Reading CSV in chunks of {self.chunk_size:,} rows...")
+        logger.info(f"Reading CSV(s) in chunks of {self.chunk_size:,} rows...")
 
         # Determine which dtypes to pass to read_csv
         # (float32 not directly supported in read_csv; use post-cast)
@@ -168,42 +211,92 @@ class FYJCDataLoader:
         chunks = []
         total_rows = 0
 
-        try:
-            chunk_iter = pd.read_csv(
-                self.csv_path,
-                dtype=read_dtypes,
-                chunksize=self.chunk_size,
-                low_memory=False,
-                encoding="utf-8",
-                on_bad_lines="warn",
-            )
+        for file_path in source_files:
+            logger.info(f"Reading {file_path.name}...")
+            try:
+                chunk_iter = pd.read_csv(
+                    file_path,
+                    dtype=read_dtypes,
+                    chunksize=self.chunk_size,
+                    low_memory=False,
+                    encoding="utf-8",
+                    on_bad_lines="warn",
+                )
 
-            for i, chunk in enumerate(chunk_iter):
-                chunk = self._optimize_chunk(chunk)
-                chunks.append(chunk)
-                total_rows += len(chunk)
-                logger.info(f"  Loaded chunk {i+1}: {total_rows:,} rows total")
+                for i, chunk in enumerate(chunk_iter):
+                    chunk = self._optimize_chunk(chunk)
+                    chunks.append(chunk)
+                    total_rows += len(chunk)
+                    logger.info(f"  Loaded chunk {i+1} from {file_path.name}: {total_rows:,} rows total")
 
-        except UnicodeDecodeError:
-            logger.warning("UTF-8 failed, retrying with latin-1 encoding...")
-            chunk_iter = pd.read_csv(
-                self.csv_path,
-                dtype=read_dtypes,
-                chunksize=self.chunk_size,
-                low_memory=False,
-                encoding="latin-1",
-                on_bad_lines="warn",
-            )
-            for i, chunk in enumerate(chunk_iter):
-                chunk = self._optimize_chunk(chunk)
-                chunks.append(chunk)
-                total_rows += len(chunk)
+            except UnicodeDecodeError:
+                logger.warning(f"UTF-8 failed for {file_path.name}, retrying with latin-1 encoding...")
+                chunk_iter = pd.read_csv(
+                    file_path,
+                    dtype=read_dtypes,
+                    chunksize=self.chunk_size,
+                    low_memory=False,
+                    encoding="latin-1",
+                    on_bad_lines="warn",
+                )
+                for i, chunk in enumerate(chunk_iter):
+                    chunk = self._optimize_chunk(chunk)
+                    chunks.append(chunk)
+                    total_rows += len(chunk)
 
         if not chunks:
-            raise ValueError("CSV file is empty or could not be parsed.")
+            raise ValueError("CSV files are empty or could not be parsed.")
 
         df = pd.concat(chunks, ignore_index=True)
-        logger.info(f"CSV load complete: {len(df):,} rows loaded")
+
+        # Align missing districtid, regionid, subject for Round 1 using choicecode mapping
+        if "choicecode" in df.columns:
+            # Build lookups from rows that have district/region values
+            valid_rows = df[df["districtid"].notna() & df["regionid"].notna()]
+            if not valid_rows.empty:
+                cc_to_dist = valid_rows.set_index("choicecode")["districtid"].astype(str).to_dict()
+                cc_to_region = valid_rows.set_index("choicecode")["regionid"].astype(str).to_dict()
+                
+                # Convert to string to avoid Categorical setitem errors
+                df["districtid"] = df["districtid"].astype(str).replace({"nan": np.nan, "NaN": np.nan, "None": np.nan, "<NA>": np.nan})
+                df["regionid"] = df["regionid"].astype(str).replace({"nan": np.nan, "NaN": np.nan, "None": np.nan, "<NA>": np.nan})
+                
+                df["districtid"] = df["districtid"].fillna(df["choicecode"].map(cc_to_dist))
+                df["regionid"] = df["regionid"].fillna(df["choicecode"].map(cc_to_region))
+
+                if "subject" in df.columns:
+                    valid_sub = valid_rows[valid_rows["subject"].notna()]
+                    cc_to_subject = valid_sub.set_index("choicecode")["subject"].astype(str).to_dict()
+                    df["subject"] = df["subject"].astype(str).replace({"nan": np.nan, "NaN": np.nan, "None": np.nan, "<NA>": np.nan})
+                    df["subject"] = df["subject"].fillna(df["choicecode"].map(cc_to_subject))
+
+            # Fallback mapping using choicecode 2-letter prefix
+            prefix_to_dist = {
+                "AM": "347.0",
+                "AU": "321.0",
+                "KO": "326.0",
+                "LA": "607.0",
+                "MU": "345.0",
+                "NG": "323.0",
+                "NK": "336.0",
+                "PN": "320.0",
+            }
+            prefix_to_region = {
+                "AM": "7",
+                "AU": "6",
+                "KO": "8",
+                "LA": "9",
+                "MU": "3",
+                "NG": "4",
+                "NK": "5",
+                "PN": "2",
+            }
+
+            cc_prefix = df["choicecode"].str[:2].str.upper()
+            df["districtid"] = df["districtid"].fillna(cc_prefix.map(prefix_to_dist))
+            df["regionid"] = df["regionid"].fillna(cc_prefix.map(prefix_to_region))
+
+        logger.info(f"CSV load complete: {len(df):,} total rows loaded")
         return df
 
     def _optimize_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
@@ -221,6 +314,10 @@ class FYJCDataLoader:
             Optimized chunk
         """
         from config.settings import RESERVATION_COLS
+
+        # Rename 'Round' to 'round_id' if necessary (e.g. for Round 1 CSV format)
+        if "Round" in chunk.columns and "round_id" not in chunk.columns:
+            chunk = chunk.rename(columns={"Round": "round_id"})
 
         # Cast reservation cutoff columns to float32
         for col in RESERVATION_COLS:

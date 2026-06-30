@@ -73,6 +73,46 @@ ALL_AREAS = sorted(
     MUMBAI_AREAS + PUNE_AREAS + NASHIK_AREAS + NAGPUR_AREAS + AURANGABAD_AREAS
 )
 
+# ─── District ID to Name Mapping ──────────────────────────────────────────────
+DISTRICT_MAP = {
+    "315": "Ahmednagar",
+    "316": "Jalgaon",
+    "317": "Beed",
+    "318": "Solapur",
+    "319": "Aurangabad",
+    "320": "Pune",
+    "321": "Hingoli",
+    "322": "Jalna",
+    "323": "Wardha",
+    "324": "Parbhani",
+    "325": "Akola",
+    "326": "Kolhapur",
+    "327": "Nashik",
+    "329": "Kolhapur (South)",
+    "330": "Sangli",
+    "331": "Raigad",
+    "332": "Palghar",
+    "333": "Amravati",
+    "334": "Osmanabad",
+    "335": "Dhule",
+    "336": "Nandurbar",
+    "338": "Latur",
+    "339": "Mumbai City",
+    "340": "Bhandara",
+    "341": "Chandrapur",
+    "342": "Ratnagiri",
+    "343": "Sindhudurg",
+    "344": "Yavatmal",
+    "345": "Thane/Mumbai Suburban",
+    "346": "Gondia",
+    "347": "Buldhana",
+    "348": "Washim",
+    "349": "Yavatmal",
+    "606": "Nagpur",
+    "607": "Nanded",
+}
+
+
 # ─── College Status Types ─────────────────────────────────────────────────────
 COLLEGE_STATUS = {
     "G": "Government",

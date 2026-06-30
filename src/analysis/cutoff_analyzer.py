@@ -58,6 +58,7 @@ class UserProfile:
     mediums:   List[str]  = field(default_factory=list)
     districts: List[str]  = field(default_factory=list)
     round_ids: Optional[List[int]] = None
+    projected_change: float = 0.0
 
     def __post_init__(self):
         """Validate marks after initialization."""
@@ -120,22 +121,25 @@ class CutoffAnalyzer:
         # 3. Add user marks for reference
         result["user_marks"] = self.profile.marks
 
-        # 4. Calculate difference
+        # 4. Apply projected change (inflation/deflation)
+        result["projected_cutoff"] = (result["cutoff"] + self.profile.projected_change).round(2)
+
+        # 5. Calculate difference based on projected cutoff
         result["difference"] = (
-            self.profile.marks - result["cutoff"]
+            self.profile.marks - result["projected_cutoff"]
         ).round(2)
 
-        # 5. Classify colleges
+        # 6. Classify colleges
         result["classification"] = result["difference"].apply(
             self._classify
         )
 
-        # 6. Estimate admission probability
+        # 7. Estimate admission probability
         result["chance_pct"] = result["difference"].apply(
             self._estimate_probability
         )
 
-        # 7. Deduplicate
+        # 8. Deduplicate
         if deduplicate:
             result = self._deduplicate(result)
 
@@ -260,7 +264,7 @@ class CutoffAnalyzer:
         """
         priority_cols = [
             "collegename", "stream", "medium", "districtid",
-            "cutoff", "user_marks", "difference",
+            "cutoff", "projected_cutoff", "user_marks", "difference",
             "classification", "chance_pct",
             "round_id", "status", "choicecode"
         ]

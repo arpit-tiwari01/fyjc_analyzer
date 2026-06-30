@@ -79,13 +79,14 @@ class FYJCApp:
 
         print_section("Loading Data", "📂")
 
-        if not self.csv_path.exists():
+        default_exists = self.csv_path.exists()
+        round_files = list(self.csv_path.parent.glob("[Rr]ound_*.csv"))
+        if not default_exists and not round_files:
             print_error(
                 f"CSV file not found: {self.csv_path}\n\n"
-                "  ➡️  Please place your FYJC cutoff CSV file at:\n"
+                "  ➡️  Please place your consolidated CSV at:\n"
                 f"     {self.csv_path}\n\n"
-                "  The file should have columns: collegename, stream, districtid,\n"
-                "  medium, round_id, SC, ST, OBC, General, EWS, etc."
+                "  or place round-specific CSV files like Round_1_cutoff_2026-27.csv in the same directory."
             )
             return None
 

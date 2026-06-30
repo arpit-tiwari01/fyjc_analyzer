@@ -103,19 +103,21 @@ class FYJCDatabase:
         category_col: str = "General",
         min_cutoff: Optional[float] = None,
         max_cutoff: Optional[float] = None,
+        reservation_details: Optional[list] = None,
     ) -> str:
         """
         Build a parameterized SQL WHERE clause from filter criteria.
 
         Args:
-            streams:      List of stream names (e.g., ['Science', 'Commerce'])
-            districts:    List of district IDs
-            mediums:      List of medium names
-            rounds:       List of round IDs
-            college_name: Partial college name (ILIKE match)
-            category_col: Which cutoff column to filter on
-            min_cutoff:   Minimum cutoff value
-            max_cutoff:   Maximum cutoff value
+            streams:             List of stream names (e.g., ['Science', 'Commerce'])
+            districts:           List of district IDs
+            mediums:             List of medium names
+            rounds:              List of round IDs
+            college_name:        Partial college name (ILIKE match)
+            category_col:        Which cutoff column to filter on
+            min_cutoff:          Minimum cutoff value
+            max_cutoff:          Maximum cutoff value
+            reservation_details: List of reservation details types
 
         Returns:
             Full SQL query string
@@ -137,6 +139,11 @@ class FYJCDatabase:
         if rounds:
             quoted = ", ".join(str(r) for r in rounds)
             conditions.append(f"round_id IN ({quoted})")
+
+        if reservation_details:
+            # Escape single quotes in details strings for safety
+            quoted = ", ".join("'" + r.replace("'", "''") + "'" for r in reservation_details)
+            conditions.append(f"ReservationDetails IN ({quoted})")
 
         if college_name:
             # Case-insensitive partial match
